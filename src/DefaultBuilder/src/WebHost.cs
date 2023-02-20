@@ -222,6 +222,19 @@ public static class WebHost
                 StaticWebAssetsLoader.UseStaticWebAssets(ctx.HostingEnvironment, ctx.Configuration);
             }
         });
+
+        ConfigureWebDefaultsCore(builder, services =>
+        {
+            services.AddRouting();
+        });
+
+        builder
+            .UseIIS()
+            .UseIISIntegration();
+    }
+
+    internal static void ConfigureWebDefaultsCore(IWebHostBuilder builder, Action<IServiceCollection>? configureRouting = null)
+    {
         builder.UseKestrel((builderContext, options) =>
         {
             options.Configure(builderContext.Configuration.GetSection("Kestrel"), reloadOnChange: true);
@@ -247,10 +260,18 @@ public static class WebHost
             services.AddTransient<IStartupFilter, ForwardedHeadersStartupFilter>();
             services.AddTransient<IConfigureOptions<ForwardedHeadersOptions>, ForwardedHeadersOptionsSetup>();
 
-            services.AddRouting();
-        })
-        .UseIIS()
-        .UseIISIntegration();
+            // Provide a way for the default host builder to configure routing. This probably means calling AddRouting.
+            // A lambda is used here because we don't want to reference AddRouting directly because of trimming.
+            // This avoids the overhead of calling AddRoutingCore multiple times on app startup.
+            if (configureRouting == null)
+            {
+                services.AddRoutingCore();
+            }
+            else
+            {
+                configureRouting(services);
+            }
+        });
     }
 
     /// <summary>

@@ -25,10 +25,7 @@ internal static class JsonRequestHelpers
 
     public static bool HasJsonContentType(HttpRequest request, out StringSegment charset)
     {
-        if (request == null)
-        {
-            throw new ArgumentNullException(nameof(request));
-        }
+        ArgumentNullException.ThrowIfNull(request);
 
         if (!MediaTypeHeaderValue.TryParse(request.ContentType, out var mt))
         {
@@ -338,7 +335,7 @@ internal static class JsonRequestHelpers
     {
         return serverCallContext.DescriptorInfo.PathDescriptorsCache.GetOrAdd(path, p =>
         {
-            ServiceDescriptorHelpers.TryResolveDescriptors(requestMessage.Descriptor, p.Split('.'), out var pathDescriptors);
+            ServiceDescriptorHelpers.TryResolveDescriptors(requestMessage.Descriptor, p.Split('.'), allowJsonName: true, out var pathDescriptors);
             return pathDescriptors;
         });
     }

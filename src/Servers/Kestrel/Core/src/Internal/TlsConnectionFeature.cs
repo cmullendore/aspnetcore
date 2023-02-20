@@ -28,14 +28,8 @@ internal sealed class TlsConnectionFeature : ITlsConnectionFeature, ITlsApplicat
 
     public TlsConnectionFeature(SslStream sslStream, ConnectionContext context)
     {
-        if (sslStream is null)
-        {
-            throw new ArgumentNullException(nameof(sslStream));
-        }
-        if (context is null)
-        {
-            throw new ArgumentNullException(nameof(context));
-        }
+        ArgumentNullException.ThrowIfNull(sslStream);
+        ArgumentNullException.ThrowIfNull(context);
 
         _sslStream = sslStream;
         _context = context;
@@ -131,7 +125,15 @@ internal sealed class TlsConnectionFeature : ITlsConnectionFeature, ITlsApplicat
     {
         try
         {
+#pragma warning disable CA1416 // Validate platform compatibility
             await _sslStream.NegotiateClientCertificateAsync(cancellationToken);
+#pragma warning restore CA1416 // Validate platform compatibility
+        }
+        catch (PlatformNotSupportedException)
+        {
+            // NegotiateClientCertificateAsync might not be supported on all platforms.
+            // Don't attempt to recover by creating a new connection. Instead, just throw error directly to the app.
+            throw;
         }
         catch
         {

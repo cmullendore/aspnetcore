@@ -345,7 +345,7 @@ internal abstract partial class IISHttpContext : NativeRequestContext, IThreadPo
         // Note Http.Sys adds the Transfer-Encoding: chunked header to HTTP/2 requests with bodies for back compat.
         // Transfer-Encoding takes priority over Content-Length.
         string transferEncoding = RequestHeaders.TransferEncoding.ToString();
-        if (transferEncoding != null && string.Equals("chunked", transferEncoding.Split(',')[^1].Trim(), StringComparison.OrdinalIgnoreCase))
+        if (IsChunked(transferEncoding))
         {
             // https://datatracker.ietf.org/doc/html/rfc7230#section-3.3.2
             // A sender MUST NOT send a Content-Length header field in any message
@@ -719,6 +719,11 @@ internal abstract partial class IISHttpContext : NativeRequestContext, IThreadPo
         Log.ApplicationError(_logger, ((IHttpConnectionFeature)this).ConnectionId, ((IHttpRequestIdentifierFeature)this).TraceIdentifier, ex);
     }
 
+    protected void ReportRequestAborted()
+    {
+        Log.RequestAborted(_logger, ((IHttpConnectionFeature)this).ConnectionId, ((IHttpRequestIdentifierFeature)this).TraceIdentifier);
+    }
+
     public void PostCompletion(NativeMethods.REQUEST_NOTIFICATION_STATUS requestNotificationStatus)
     {
         NativeMethods.HttpSetCompletionStatus(_requestNativeHandle, requestNotificationStatus);
@@ -829,5 +834,20 @@ internal abstract partial class IISHttpContext : NativeRequestContext, IThreadPo
     {
         return success ? NativeMethods.REQUEST_NOTIFICATION_STATUS.RQ_NOTIFICATION_CONTINUE
                        : NativeMethods.REQUEST_NOTIFICATION_STATUS.RQ_NOTIFICATION_FINISH_REQUEST;
+    }
+
+    private static bool IsChunked(string? transferEncoding)
+    {
+        if (transferEncoding is null)
+        {
+            return false;
+        }
+
+        var index = transferEncoding.LastIndexOf(',');
+        if (transferEncoding.AsSpan().Slice(index + 1).Trim().Equals("chunked", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+        return false;
     }
 }

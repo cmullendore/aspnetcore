@@ -529,6 +529,7 @@ public class HttpsConnectionMiddlewareTests : LoggedTest
     [ConditionalTheory]
     [InlineData(HttpProtocols.Http1)]
     [InlineData(HttpProtocols.Http1AndHttp2)] // Make sure turning on Http/2 doesn't regress HTTP/1
+    [TlsAlpnSupported]
     [OSSkipCondition(OperatingSystems.MacOSX, SkipReason = "Missing platform support.")]
     [SkipOnHelix("https://github.com/dotnet/aspnetcore/issues/33566#issuecomment-892031659", Queues = HelixConstants.RedhatAmd64)] // Outdated OpenSSL client
     public async Task CanRenegotiateForClientCertificate(HttpProtocols httpProtocols)
@@ -555,6 +556,49 @@ public class HttpsConnectionMiddlewareTests : LoggedTest
             Assert.NotNull(clientCert);
             Assert.NotNull(tlsFeature.ClientCertificate);
             Assert.NotNull(context.Connection.ClientCertificate);
+
+            await context.Response.WriteAsync("hello world");
+        }, new TestServiceContext(LoggerFactory), ConfigureListenOptions);
+
+        using var connection = server.CreateConnection();
+        // SslStream is used to ensure the certificate is actually passed to the server
+        // HttpClient might not send the certificate because it is invalid or it doesn't match any
+        // of the certificate authorities sent by the server in the SSL handshake.
+        // Use a random host name to avoid the TLS session resumption cache.
+        var stream = OpenSslStreamWithCert(connection.Stream);
+        await stream.AuthenticateAsClientAsync(Guid.NewGuid().ToString());
+        await AssertConnectionResult(stream, true);
+    }
+
+    [ConditionalFact]
+    [TlsAlpnSupported]
+    [OSSkipCondition(OperatingSystems.Windows | OperatingSystems.Linux, SkipReason = "MacOS only test.")]
+    public async Task CanRenegotiateForClientCertificate_MacOS_PlatformNotSupportedException()
+    {
+        void ConfigureListenOptions(ListenOptions listenOptions)
+        {
+            listenOptions.Protocols = HttpProtocols.Http1;
+            listenOptions.UseHttps(options =>
+            {
+                options.ServerCertificate = _x509Certificate2;
+                options.ClientCertificateMode = ClientCertificateMode.DelayCertificate;
+                options.AllowAnyClientCertificate();
+            });
+        }
+
+        await using var server = new TestServer(async context =>
+        {
+            var tlsFeature = context.Features.Get<ITlsConnectionFeature>();
+            Assert.NotNull(tlsFeature);
+            Assert.Null(tlsFeature.ClientCertificate);
+            Assert.Null(context.Connection.ClientCertificate);
+
+            await Assert.ThrowsAsync<PlatformNotSupportedException>(() => context.Connection.GetClientCertificateAsync());
+
+            var lifetimeNotificationFeature = context.Features.Get<IConnectionLifetimeNotificationFeature>();
+            Assert.False(
+                lifetimeNotificationFeature.ConnectionClosedRequested.IsCancellationRequested,
+                "GetClientCertificateAsync shouldn't cause the connection to be closed.");
 
             await context.Response.WriteAsync("hello world");
         }, new TestServiceContext(LoggerFactory), ConfigureListenOptions);
@@ -611,6 +655,7 @@ public class HttpsConnectionMiddlewareTests : LoggedTest
     }
 
     [ConditionalFact]
+    [TlsAlpnSupported]
     [OSSkipCondition(OperatingSystems.MacOSX, SkipReason = "Missing platform support.")]
     [SkipOnHelix("https://github.com/dotnet/aspnetcore/issues/33566#issuecomment-892031659", Queues = HelixConstants.RedhatAmd64)] // Outdated OpenSSL client
     public async Task CanRenegotiateForTlsCallbackOptions()
@@ -658,6 +703,7 @@ public class HttpsConnectionMiddlewareTests : LoggedTest
     }
 
     [ConditionalFact]
+    [TlsAlpnSupported]
     [OSSkipCondition(OperatingSystems.MacOSX, SkipReason = "Missing platform support.")]
     [SkipOnHelix("https://github.com/dotnet/aspnetcore/issues/33566#issuecomment-892031659", Queues = HelixConstants.RedhatAmd64)] // Outdated OpenSSL client
     public async Task CanRenegotiateForClientCertificateOnHttp1CanReturnNoCert()
@@ -782,6 +828,7 @@ public class HttpsConnectionMiddlewareTests : LoggedTest
     // TLS 1.2 and lower have to renegotiate the whole connection to get a client cert, and if that hits an error
     // then the connection is aborted.
     [OSSkipCondition(OperatingSystems.MacOSX, SkipReason = "Missing platform support.")]
+    [TlsAlpnSupported]
     [SkipOnHelix("https://github.com/dotnet/aspnetcore/issues/33566#issuecomment-892031659", Queues = HelixConstants.RedhatAmd64)] // Outdated OpenSSL client
     public async Task RenegotiateForClientCertificateOnPostWithoutBufferingThrows()
     {
@@ -824,7 +871,7 @@ public class HttpsConnectionMiddlewareTests : LoggedTest
 
     [ConditionalFact]
     [MinimumOSVersion(OperatingSystems.Windows, WindowsVersions.Win10)] // HTTP/2 requires Win10
-    [OSSkipCondition(OperatingSystems.MacOSX, SkipReason = "ALPN not supported")]
+    [TlsAlpnSupported]
     public async Task ServerOptionsSelectionCallback_SetsALPN()
     {
         static void ConfigureListenOptions(ListenOptions listenOptions)
@@ -852,7 +899,7 @@ public class HttpsConnectionMiddlewareTests : LoggedTest
 
     [ConditionalFact]
     [MinimumOSVersion(OperatingSystems.Windows, WindowsVersions.Win10)] // HTTP/2 requires Win10
-    [OSSkipCondition(OperatingSystems.MacOSX, SkipReason = "ALPN not supported")]
+    [TlsAlpnSupported]
     public async Task TlsHandshakeCallbackOptionsOverload_SetsALPN()
     {
         static void ConfigureListenOptions(ListenOptions listenOptions)
@@ -884,7 +931,7 @@ public class HttpsConnectionMiddlewareTests : LoggedTest
     }
 
     [ConditionalFact]
-    [OSSkipCondition(OperatingSystems.MacOSX, SkipReason = "ALPN not supported")]
+    [TlsAlpnSupported]
     public async Task TlsHandshakeCallbackOptionsOverload_EmptyAlpnList_DisablesAlpn()
     {
         static void ConfigureListenOptions(ListenOptions listenOptions)
@@ -917,6 +964,7 @@ public class HttpsConnectionMiddlewareTests : LoggedTest
     }
 
     [ConditionalFact]
+    [TlsAlpnSupported]
     [OSSkipCondition(OperatingSystems.MacOSX, SkipReason = "Missing platform support.")]
     [SkipOnHelix("https://github.com/dotnet/aspnetcore/issues/33566#issuecomment-892031659", Queues = HelixConstants.RedhatAmd64)] // Outdated OpenSSL client
     public async Task CanRenegotiateForClientCertificateOnPostIfDrained()
@@ -964,6 +1012,7 @@ public class HttpsConnectionMiddlewareTests : LoggedTest
 
     [ConditionalFact]
     [OSSkipCondition(OperatingSystems.MacOSX, SkipReason = "Missing platform support.")]
+    [TlsAlpnSupported]
     [SkipOnHelix("https://github.com/dotnet/aspnetcore/issues/33566#issuecomment-892031659", Queues = HelixConstants.RedhatAmd64)] // Outdated OpenSSL client
     public async Task RenegotationFailureCausesConnectionClose()
     {
@@ -1265,7 +1314,7 @@ public class HttpsConnectionMiddlewareTests : LoggedTest
     [InlineData(HttpProtocols.Http1)]
     [InlineData(HttpProtocols.Http2)]
     [InlineData(HttpProtocols.Http1AndHttp2)]
-    [OSSkipCondition(OperatingSystems.MacOSX, SkipReason = "Missing SslStream ALPN support: https://github.com/dotnet/runtime/issues/27727")]
+    [TlsAlpnSupported]
     [MinimumOSVersion(OperatingSystems.Windows, WindowsVersions.Win10)]
     public async Task ListenOptionsProtolsCanBeSetAfterUseHttps(HttpProtocols httpProtocols)
     {

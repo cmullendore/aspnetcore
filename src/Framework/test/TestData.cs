@@ -2,6 +2,8 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using System.Reflection;
+using System.Runtime.InteropServices;
+using Microsoft.AspNetCore.Testing;
 
 namespace Microsoft.AspNetCore;
 
@@ -90,6 +92,7 @@ public static class TestData
                 "Microsoft.AspNetCore.Server.Kestrel",
                 "Microsoft.AspNetCore.Server.Kestrel.Core",
                 "Microsoft.AspNetCore.Server.Kestrel.Transport.Quic",
+                "Microsoft.AspNetCore.Server.Kestrel.Transport.NamedPipes",
                 "Microsoft.AspNetCore.Server.Kestrel.Transport.Sockets",
                 "Microsoft.AspNetCore.Session",
                 "Microsoft.AspNetCore.SignalR",
@@ -152,6 +155,13 @@ public static class TestData
                 "System.Security.Cryptography.Xml",
                 "System.Threading.RateLimiting",
             };
+
+        // System.Diagnostics.EventLog.Messages is only present in the Windows build.
+        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows) &&
+            !SkipOnHelixAttribute.OnHelix()) // Helix tests always run against the Windows assets (even on non-Windows)
+        {
+            ListedSharedFxAssemblies.Remove("System.Diagnostics.EventLog.Messages");
+        }
 
         ListedTargetingPackAssemblies = new List<string>
             {
@@ -228,6 +238,7 @@ public static class TestData
                 { "Microsoft.AspNetCore.Server.Kestrel.Core" },
                 { "Microsoft.AspNetCore.Server.Kestrel.Transport.Quic" },
                 { "Microsoft.AspNetCore.Server.Kestrel.Transport.Sockets" },
+                { "Microsoft.AspNetCore.Server.Kestrel.Transport.NamedPipes" },
                 { "Microsoft.AspNetCore.Server.Kestrel" },
                 { "Microsoft.AspNetCore.Session" },
                 { "Microsoft.AspNetCore.SignalR.Common" },

@@ -77,10 +77,7 @@ public class RouteOptions
         }
         set
         {
-            if (value == null)
-            {
-                throw new ArgumentNullException(nameof(ConstraintMap));
-            }
+            ArgumentNullException.ThrowIfNull(value);
 
             _constraintTypeMap = value;
         }
@@ -116,9 +113,10 @@ public class RouteOptions
         AddConstraint<MaxRouteConstraint>(defaults, "max");
         AddConstraint<RangeRouteConstraint>(defaults, "range");
 
-        // Regex-based constraints
+        // The alpha constraint uses a compiled regex which has a minimal size cost.
         AddConstraint<AlphaRouteConstraint>(defaults, "alpha");
-        AddConstraint<RegexInlineRouteConstraint>(defaults, "regex");
+
+        AddConstraint<RegexErrorStubRouteConstraint>(defaults, "regex"); // Used to generate error message at runtime with helpful message.
 
         AddConstraint<RequiredRouteConstraint>(defaults, "required");
 

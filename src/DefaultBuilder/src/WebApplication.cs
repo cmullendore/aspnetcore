@@ -86,7 +86,7 @@ public sealed class WebApplication : IHost, IApplicationBuilder, IEndpointRouteB
     /// <summary>
     /// Initializes a new instance of the <see cref="WebApplication"/> class with preconfigured defaults.
     /// </summary>
-    /// <param name="args">Command line arguments</param>
+    /// <param name="args">The command line arguments.</param>
     /// <returns>The <see cref="WebApplication"/>.</returns>
     public static WebApplication Create(string[]? args = null) =>
         new WebApplicationBuilder(new() { Args = args }).Build();
@@ -99,12 +99,27 @@ public sealed class WebApplication : IHost, IApplicationBuilder, IEndpointRouteB
         new(new());
 
     /// <summary>
+    /// Initializes a new instance of the <see cref="WebApplicationBuilder"/> class with minimal defaults.
+    /// </summary>
+    /// <returns>The <see cref="WebApplicationBuilder"/>.</returns>
+    public static WebApplicationBuilder CreateSlimBuilder() =>
+        new(new(), slim: true);
+
+    /// <summary>
     /// Initializes a new instance of the <see cref="WebApplicationBuilder"/> class with preconfigured defaults.
     /// </summary>
-    /// <param name="args">Command line arguments</param>
+    /// <param name="args">The command line arguments.</param>
     /// <returns>The <see cref="WebApplicationBuilder"/>.</returns>
     public static WebApplicationBuilder CreateBuilder(string[] args) =>
         new(new() { Args = args });
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="WebApplicationBuilder"/> class with minimal defaults.
+    /// </summary>
+    /// <param name="args">The command line arguments.</param>
+    /// <returns>The <see cref="WebApplicationBuilder"/>.</returns>
+    public static WebApplicationBuilder CreateSlimBuilder(string[] args) =>
+        new(new() { Args = args }, slim: true);
 
     /// <summary>
     /// Initializes a new instance of the <see cref="WebApplicationBuilder"/> class with preconfigured defaults.
@@ -113,6 +128,14 @@ public sealed class WebApplication : IHost, IApplicationBuilder, IEndpointRouteB
     /// <returns>The <see cref="WebApplicationBuilder"/>.</returns>
     public static WebApplicationBuilder CreateBuilder(WebApplicationOptions options) =>
         new(options);
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="WebApplicationBuilder"/> class with minimal defaults.
+    /// </summary>
+    /// <param name="options">The <see cref="WebApplicationOptions"/> to configure the <see cref="WebApplicationBuilder"/>.</param>
+    /// <returns>The <see cref="WebApplicationBuilder"/>.</returns>
+    public static WebApplicationBuilder CreateSlimBuilder(WebApplicationOptions options) =>
+        new(options, slim: true);
 
     /// <summary>
     /// Start the application.

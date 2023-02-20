@@ -86,6 +86,133 @@ public sealed class WebApplicationBuilder
         WebHost = new ConfigureWebHostBuilder(webHostContext, Configuration, Services);
     }
 
+    internal WebApplicationBuilder(WebApplicationOptions options, bool slim, Action<IHostBuilder>? configureDefaults = null)
+    {
+        Debug.Assert(slim, "should only be called with slim: true");
+
+        var configuration = new ConfigurationManager();
+
+        configuration.AddEnvironmentVariables(prefix: "ASPNETCORE_");
+
+        // SetDefaultContentRoot needs to be added between 'ASPNETCORE_' and 'DOTNET_' in order to match behavior of the non-slim WebApplicationBuilder.
+        SetDefaultContentRoot(options, configuration);
+
+        // Add the default host environment variable configuration source.
+        // This won't be added by CreateEmptyApplicationBuilder.
+        configuration.AddEnvironmentVariables(prefix: "DOTNET_");
+
+        _hostApplicationBuilder = Microsoft.Extensions.Hosting.Host.CreateEmptyApplicationBuilder(new HostApplicationBuilderSettings
+        {
+            Args = options.Args,
+            ApplicationName = options.ApplicationName,
+            EnvironmentName = options.EnvironmentName,
+            ContentRootPath = options.ContentRootPath,
+            Configuration = configuration,
+        });
+
+        // Ensure the same behavior of the non-slim WebApplicationBuilder by adding the default "app" Configuration sources
+        ApplyDefaultAppConfiguration(options, configuration);
+
+        // configure the ServiceProviderOptions here since CreateEmptyApplicationBuilder won't.
+        var serviceProviderFactory = GetServiceProviderFactory(_hostApplicationBuilder);
+        _hostApplicationBuilder.ConfigureContainer(serviceProviderFactory);
+
+        // Set WebRootPath if necessary
+        if (options.WebRootPath is not null)
+        {
+            Configuration.AddInMemoryCollection(new[]
+            {
+                new KeyValuePair<string, string?>(WebHostDefaults.WebRootKey, options.WebRootPath),
+            });
+        }
+
+        // Run methods to configure web host defaults early to populate services
+        var bootstrapHostBuilder = new BootstrapHostBuilder(_hostApplicationBuilder);
+
+        // This is for testing purposes
+        configureDefaults?.Invoke(bootstrapHostBuilder);
+
+        bootstrapHostBuilder.ConfigureSlimWebHost(
+            webHostBuilder =>
+            {
+                AspNetCore.WebHost.ConfigureWebDefaultsCore(webHostBuilder);
+
+                webHostBuilder.Configure(ConfigureEmptyApplication);
+
+                webHostBuilder.UseSetting(WebHostDefaults.ApplicationKey, _hostApplicationBuilder.Environment.ApplicationName ?? "");
+                webHostBuilder.UseSetting(WebHostDefaults.PreventHostingStartupKey, Configuration[WebHostDefaults.PreventHostingStartupKey]);
+                webHostBuilder.UseSetting(WebHostDefaults.HostingStartupAssembliesKey, Configuration[WebHostDefaults.HostingStartupAssembliesKey]);
+                webHostBuilder.UseSetting(WebHostDefaults.HostingStartupExcludeAssembliesKey, Configuration[WebHostDefaults.HostingStartupExcludeAssembliesKey]);
+            },
+            options =>
+            {
+                // We've already applied "ASPNETCORE_" environment variables to hosting config
+                options.SuppressEnvironmentConfiguration = true;
+            });
+
+        // This applies the config from ConfigureWebHostDefaults
+        // Grab the GenericWebHostService ServiceDescriptor so we can append it after any user-added IHostedServices during Build();
+        _genericWebHostServiceDescriptor = bootstrapHostBuilder.RunDefaultCallbacks();
+
+        // Grab the WebHostBuilderContext from the property bag to use in the ConfigureWebHostBuilder. Then
+        // grab the IWebHostEnvironment from the webHostContext. This also matches the instance in the IServiceCollection.
+        var webHostContext = (WebHostBuilderContext)bootstrapHostBuilder.Properties[typeof(WebHostBuilderContext)];
+        Environment = webHostContext.HostingEnvironment;
+
+        Host = new ConfigureHostBuilder(bootstrapHostBuilder.Context, Configuration, Services);
+        WebHost = new ConfigureWebHostBuilder(webHostContext, Configuration, Services);
+    }
+
+    private static DefaultServiceProviderFactory GetServiceProviderFactory(HostApplicationBuilder hostApplicationBuilder)
+    {
+        if (hostApplicationBuilder.Environment.IsDevelopment())
+        {
+            return new DefaultServiceProviderFactory(
+                new ServiceProviderOptions
+                {
+                    ValidateScopes = true,
+                    ValidateOnBuild = true,
+                });
+        }
+
+        return new DefaultServiceProviderFactory();
+    }
+
+    private static void SetDefaultContentRoot(WebApplicationOptions options, ConfigurationManager configuration)
+    {
+        if (options.ContentRootPath is null && configuration[HostDefaults.ContentRootKey] is null)
+        {
+            // Logic taken from https://github.com/dotnet/runtime/blob/78ed4438a42acab80541e9bde1910abaa8841db2/src/libraries/Microsoft.Extensions.Hosting/src/HostingHostBuilderExtensions.cs#L209-L227
+
+            // If we're running anywhere other than C:\Windows\system32, we default to using the CWD for the ContentRoot.
+            // However, since many things like Windows services and MSIX installers have C:\Windows\system32 as there CWD which is not likely
+            // to really be the home for things like appsettings.json, we skip changing the ContentRoot in that case. The non-"default" initial
+            // value for ContentRoot is AppContext.BaseDirectory (e.g. the executable path) which probably makes more sense than the system32.
+
+            // In my testing, both Environment.CurrentDirectory and Environment.GetFolderPath(Environment.SpecialFolder.System) return the path without
+            // any trailing directory separator characters. I'm not even sure the casing can ever be different from these APIs, but I think it makes sense to
+            // ignore case for Windows path comparisons given the file system is usually (always?) going to be case insensitive for the system path.
+            string cwd = System.Environment.CurrentDirectory;
+            if (!OperatingSystem.IsWindows() || !string.Equals(cwd, System.Environment.GetFolderPath(System.Environment.SpecialFolder.System), StringComparison.OrdinalIgnoreCase))
+            {
+                configuration.AddInMemoryCollection(new[]
+                {
+                    new KeyValuePair<string, string?>(HostDefaults.ContentRootKey, cwd),
+                });
+            }
+        }
+    }
+
+    private static void ApplyDefaultAppConfiguration(WebApplicationOptions options, ConfigurationManager configuration)
+    {
+        configuration.AddEnvironmentVariables();
+
+        if (options.Args is { Length: > 0 } args)
+        {
+            configuration.AddCommandLine(args);
+        }
+    }
+
     /// <summary>
     /// Provides information about the web hosting environment an application is running.
     /// </summary>
@@ -134,6 +261,46 @@ public sealed class WebApplicationBuilder
 
     private void ConfigureApplication(WebHostBuilderContext context, IApplicationBuilder app)
     {
+        ConfigureApplicationCore(
+            context,
+            app,
+            processAuthMiddlewares: () =>
+            {
+                Debug.Assert(_builtApplication is not null);
+
+                // Process authorization and authentication middlewares independently to avoid
+                // registering middlewares for services that do not exist
+                var serviceProviderIsService = _builtApplication.Services.GetService<IServiceProviderIsService>();
+                if (serviceProviderIsService?.IsService(typeof(IAuthenticationSchemeProvider)) is true)
+                {
+                    // Don't add more than one instance of the middleware
+                    if (!_builtApplication.Properties.ContainsKey(AuthenticationMiddlewareSetKey))
+                    {
+                        // The Use invocations will set the property on the outer pipeline,
+                        // but we want to set it on the inner pipeline as well.
+                        _builtApplication.Properties[AuthenticationMiddlewareSetKey] = true;
+                        app.UseAuthentication();
+                    }
+                }
+
+                if (serviceProviderIsService?.IsService(typeof(IAuthorizationHandlerProvider)) is true)
+                {
+                    if (!_builtApplication.Properties.ContainsKey(AuthorizationMiddlewareSetKey))
+                    {
+                        _builtApplication.Properties[AuthorizationMiddlewareSetKey] = true;
+                        app.UseAuthorization();
+                    }
+                }
+            });
+    }
+
+    private void ConfigureEmptyApplication(WebHostBuilderContext context, IApplicationBuilder app)
+    {
+        ConfigureApplicationCore(context, app, processAuthMiddlewares: null);
+    }
+
+    private void ConfigureApplicationCore(WebHostBuilderContext context, IApplicationBuilder app, Action? processAuthMiddlewares)
+    {
         Debug.Assert(_builtApplication is not null);
 
         // UseRouting called before WebApplication such as in a StartupFilter
@@ -173,29 +340,7 @@ public sealed class WebApplicationBuilder
             }
         }
 
-        // Process authorization and authentication middlewares independently to avoid
-        // registering middlewares for services that do not exist
-        var serviceProviderIsService = _builtApplication.Services.GetService<IServiceProviderIsService>();
-        if (serviceProviderIsService?.IsService(typeof(IAuthenticationSchemeProvider)) is true)
-        {
-            // Don't add more than one instance of the middleware
-            if (!_builtApplication.Properties.ContainsKey(AuthenticationMiddlewareSetKey))
-            {
-                // The Use invocations will set the property on the outer pipeline,
-                // but we want to set it on the inner pipeline as well.
-                _builtApplication.Properties[AuthenticationMiddlewareSetKey] = true;
-                app.UseAuthentication();
-            }
-        }
-
-        if (serviceProviderIsService?.IsService(typeof(IAuthorizationHandlerProvider)) is true)
-        {
-            if (!_builtApplication.Properties.ContainsKey(AuthorizationMiddlewareSetKey))
-            {
-                _builtApplication.Properties[AuthorizationMiddlewareSetKey] = true;
-                app.UseAuthorization();
-            }
-        }
+        processAuthMiddlewares?.Invoke();
 
         // Wire the source pipeline to run in the destination pipeline
         app.Use(next =>

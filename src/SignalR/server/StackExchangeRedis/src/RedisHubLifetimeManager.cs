@@ -165,10 +165,7 @@ public class RedisHubLifetimeManager<THub> : HubLifetimeManager<THub>, IDisposab
     /// <inheritdoc />
     public override Task SendConnectionAsync(string connectionId, string methodName, object?[] args, CancellationToken cancellationToken = default)
     {
-        if (connectionId == null)
-        {
-            throw new ArgumentNullException(nameof(connectionId));
-        }
+        ArgumentNullException.ThrowIfNull(connectionId);
 
         // If the connection is local we can skip sending the message through the bus since we require sticky connections.
         // This also saves serializing and deserializing the message!
@@ -185,10 +182,7 @@ public class RedisHubLifetimeManager<THub> : HubLifetimeManager<THub>, IDisposab
     /// <inheritdoc />
     public override Task SendGroupAsync(string groupName, string methodName, object?[] args, CancellationToken cancellationToken = default)
     {
-        if (groupName == null)
-        {
-            throw new ArgumentNullException(nameof(groupName));
-        }
+        ArgumentNullException.ThrowIfNull(groupName);
 
         var message = _protocol.WriteInvocation(methodName, args);
         return PublishAsync(_channels.Group(groupName), message);
@@ -197,10 +191,7 @@ public class RedisHubLifetimeManager<THub> : HubLifetimeManager<THub>, IDisposab
     /// <inheritdoc />
     public override Task SendGroupExceptAsync(string groupName, string methodName, object?[] args, IReadOnlyList<string> excludedConnectionIds, CancellationToken cancellationToken = default)
     {
-        if (groupName == null)
-        {
-            throw new ArgumentNullException(nameof(groupName));
-        }
+        ArgumentNullException.ThrowIfNull(groupName);
 
         var message = _protocol.WriteInvocation(methodName, args, excludedConnectionIds: excludedConnectionIds);
         return PublishAsync(_channels.Group(groupName), message);
@@ -216,15 +207,8 @@ public class RedisHubLifetimeManager<THub> : HubLifetimeManager<THub>, IDisposab
     /// <inheritdoc />
     public override Task AddToGroupAsync(string connectionId, string groupName, CancellationToken cancellationToken = default)
     {
-        if (connectionId == null)
-        {
-            throw new ArgumentNullException(nameof(connectionId));
-        }
-
-        if (groupName == null)
-        {
-            throw new ArgumentNullException(nameof(groupName));
-        }
+        ArgumentNullException.ThrowIfNull(connectionId);
+        ArgumentNullException.ThrowIfNull(groupName);
 
         var connection = _connections[connectionId];
         if (connection != null)
@@ -239,15 +223,8 @@ public class RedisHubLifetimeManager<THub> : HubLifetimeManager<THub>, IDisposab
     /// <inheritdoc />
     public override Task RemoveFromGroupAsync(string connectionId, string groupName, CancellationToken cancellationToken = default)
     {
-        if (connectionId == null)
-        {
-            throw new ArgumentNullException(nameof(connectionId));
-        }
-
-        if (groupName == null)
-        {
-            throw new ArgumentNullException(nameof(groupName));
-        }
+        ArgumentNullException.ThrowIfNull(connectionId);
+        ArgumentNullException.ThrowIfNull(groupName);
 
         var connection = _connections[connectionId];
         if (connection != null)
@@ -262,10 +239,7 @@ public class RedisHubLifetimeManager<THub> : HubLifetimeManager<THub>, IDisposab
     /// <inheritdoc />
     public override Task SendConnectionsAsync(IReadOnlyList<string> connectionIds, string methodName, object?[] args, CancellationToken cancellationToken = default)
     {
-        if (connectionIds == null)
-        {
-            throw new ArgumentNullException(nameof(connectionIds));
-        }
+        ArgumentNullException.ThrowIfNull(connectionIds);
 
         var publishTasks = new List<Task>(connectionIds.Count);
         var payload = _protocol.WriteInvocation(methodName, args);
@@ -281,10 +255,7 @@ public class RedisHubLifetimeManager<THub> : HubLifetimeManager<THub>, IDisposab
     /// <inheritdoc />
     public override Task SendGroupsAsync(IReadOnlyList<string> groupNames, string methodName, object?[] args, CancellationToken cancellationToken = default)
     {
-        if (groupNames == null)
-        {
-            throw new ArgumentNullException(nameof(groupNames));
-        }
+        ArgumentNullException.ThrowIfNull(groupNames);
         var publishTasks = new List<Task>(groupNames.Count);
         var payload = _protocol.WriteInvocation(methodName, args);
 
@@ -408,10 +379,7 @@ public class RedisHubLifetimeManager<THub> : HubLifetimeManager<THub>, IDisposab
     public override async Task<T> InvokeConnectionAsync<T>(string connectionId, string methodName, object?[] args, CancellationToken cancellationToken)
     {
         // send thing
-        if (connectionId == null)
-        {
-            throw new ArgumentNullException(nameof(connectionId));
-        }
+        ArgumentNullException.ThrowIfNull(connectionId);
 
         var connection = _connections[connectionId];
 
@@ -487,7 +455,7 @@ public class RedisHubLifetimeManager<THub> : HubLifetimeManager<THub>, IDisposab
             {
                 RedisLog.ReceivedFromChannel(_logger, _channels.All);
 
-                var invocation = RedisProtocol.ReadInvocation((byte[])channelMessage.Message);
+                var invocation = RedisProtocol.ReadInvocation(channelMessage.Message);
 
                 var tasks = new List<Task>(_connections.Count);
 
@@ -515,7 +483,7 @@ public class RedisHubLifetimeManager<THub> : HubLifetimeManager<THub>, IDisposab
         {
             try
             {
-                var groupMessage = RedisProtocol.ReadGroupCommand((byte[])channelMessage.Message);
+                var groupMessage = RedisProtocol.ReadGroupCommand(channelMessage.Message);
 
                 var connection = _connections[groupMessage.ConnectionId];
                 if (connection == null)
@@ -550,7 +518,7 @@ public class RedisHubLifetimeManager<THub> : HubLifetimeManager<THub>, IDisposab
         var channel = await _bus!.SubscribeAsync(_channels.Ack(_serverName));
         channel.OnMessage(channelMessage =>
         {
-            var ackId = RedisProtocol.ReadAck((byte[])channelMessage.Message);
+            var ackId = RedisProtocol.ReadAck(channelMessage.Message);
 
             _ackHandler.TriggerAck(ackId);
         });
@@ -564,7 +532,7 @@ public class RedisHubLifetimeManager<THub> : HubLifetimeManager<THub>, IDisposab
         var channel = await _bus!.SubscribeAsync(connectionChannel);
         channel.OnMessage(channelMessage =>
         {
-            var invocation = RedisProtocol.ReadInvocation((byte[])channelMessage.Message);
+            var invocation = RedisProtocol.ReadInvocation(channelMessage.Message);
 
             // This is a Client result we need to setup state for the completion and forward the message to the client
             if (!string.IsNullOrEmpty(invocation.InvocationId))
@@ -593,7 +561,7 @@ public class RedisHubLifetimeManager<THub> : HubLifetimeManager<THub>, IDisposab
                     }
                     catch (Exception ex)
                     {
-                        RedisLog.ErrorForwardingResult(_logger, completionMessage.InvocationId, ex);
+                        RedisLog.ErrorForwardingResult(_logger, completionMessage.InvocationId!, ex);
                     }
                 }));
 
@@ -623,7 +591,7 @@ public class RedisHubLifetimeManager<THub> : HubLifetimeManager<THub>, IDisposab
             {
                 try
                 {
-                    var invocation = RedisProtocol.ReadInvocation((byte[])channelMessage.Message);
+                    var invocation = RedisProtocol.ReadInvocation(channelMessage.Message);
 
                     var tasks = new List<Task>(subscriptions.Count);
                     foreach (var userConnection in subscriptions)
@@ -649,7 +617,7 @@ public class RedisHubLifetimeManager<THub> : HubLifetimeManager<THub>, IDisposab
         {
             try
             {
-                var invocation = RedisProtocol.ReadInvocation((byte[])channelMessage.Message);
+                var invocation = RedisProtocol.ReadInvocation(channelMessage.Message);
 
                 var tasks = new List<Task>(groupConnections.Count);
                 foreach (var groupConnection in groupConnections)
@@ -810,7 +778,10 @@ public class RedisHubLifetimeManager<THub> : HubLifetimeManager<THub>, IDisposab
                             return;
                         }
 
-                        RedisLog.ConnectionFailed(_logger, e.Exception);
+                        if (e.Exception is not null)
+                        {
+                            RedisLog.ConnectionFailed(_logger, e.Exception);
+                        }
                     };
 
                     if (_redisServerConnection.IsConnected)
